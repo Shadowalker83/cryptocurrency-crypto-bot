@@ -190,162 +190,185 @@ module.exports = {
     // !cs / !creditstakes -> Credit stakes to users
     /* ------------------------------------------------------------------------------ */
 
-    command_credit_stakes: async function(manuallyFired,userName,messageType,userRole,msg){
-        // Check if user is admin
-        if(userRole < 3){
-            chat.chat_reply(msg,'embed',userName,messageType,config.colors.error,false,config.messages.title.error,false,config.messages.notAllowedCommand,false,false,false,false);
-            return
-        }
-        // Get total wallet balance
-        var walletBalance = await wallet.wallet_get_balance();
-        if(!walletBalance){
-            if(manuallyFired == 1){
-                //msg,replyType,replyUsername,senderMessageType,replyEmbedColor,replyAuthor,replyTitle,replyFields,replyDescription,replyFooter,replyThumbnail,replyImage,replyTimestamp
-                chat.chat_reply(msg,'embed',userName,messageType,config.colors.error,false,config.messages.title.error,false,config.messages.walletOffline,false,false,false,false);
-                return;
-            }else{
-                log.log_write_console(config.messages.walletOffline);
-                return;
-            }
-        }
-        // Debug log
-        if(config.staking.debug)
-            log.log_write_console(config.messages.log.stakecredit+' '+Big(walletBalance).toFixed());
-        // Get not credited stake transactions and sum amount
-        var transactionsToCredit = await transaction.transaction_get_stake_transactions_to_credit();
-        if(!transactionsToCredit){
-            if(manuallyFired == 1){
-                chat.chat_reply(msg,'embed',userName,messageType,config.colors.error,false,config.messages.title.error,false,config.messages.wentWrong,false,false,false,false); 
-                return;
-            }else{
-                return;
-            }
-        }
-        // Check if no transaction to handle
-        var countCreditedStakes = 0;
-        if(!transactionsToCredit.length){
-            if(manuallyFired == 1){
-                //msg,replyType,replyUsername,senderMessageType,replyEmbedColor,replyAuthor,replyTitle,replyFields,replyDescription,replyFooter,replyThumbnail,replyImage,replyTimestamp
-                chat.chat_reply(msg,'embed',userName,messageType,config.colors.special,false,config.messages.creditstakes.manually,[[config.messages.creditstakes.transactions,countCreditedStakes,false]],false,false,false,false,false);
-                return;
-            }else{
-                log.log_write_console(config.messages.creditstakes.cron+' `'+countCreditedStakes+'` '+config.messages.creditstakes.cron2);
-                return;
-            }
-        }
-        var totalStakes = 0;
-        var totalStakeSum = 0;
-        var transactionsToCreditLog = config.messages.log.stakecredit7+' ';
-        var highestTransactionID = 0;
-        for (var i = 0 ; i < transactionsToCredit.length ; ++i){
-            //console.log(transactionsToCredit[i].amount);
-            transactionsToCreditLog = transactionsToCreditLog + transactionsToCredit[i].id+', ';
-            highestTransactionID = transactionsToCredit[i].id;
-            totalStakeSum = Big(totalStakeSum).plus(transactionsToCredit[i].amount);
-            totalStakes++;
-        }
-        transactionsToCreditLog = transactionsToCreditLog.slice(0, -2);
-        // Debug log
-        if(config.staking.debug)
-            log.log_write_console(config.messages.log.stakecredit1+' '+Big(totalStakeSum).toFixed());
-        // Substract bot owner percentage from total sum of stakes
-        var totalStakeSumMinusOwnerPercentage = Big(totalStakeSum).div(100);
-        totalStakeSumMinusOwnerPercentage = Big(totalStakeSumMinusOwnerPercentage).times(config.staking.ownerPercentage);
-        // Debug log
-        if(config.staking.debug){
-            log.log_write_console(config.messages.log.stakecredit2+' '+Big(totalStakeSumMinusOwnerPercentage).toFixed());
-            log.log_write_console(transactionsToCreditLog);
-        }
-        // Check for each user how much he owns from totalStakeSumMinusOwnerPercentage balance and calculate percentage of the value he owns
-        var getStakeUsers = await user.user_get_stake_users();
-        if(!getStakeUsers){
-            if(manuallyFired == 1){
-                chat.chat_reply(msg,'embed',userName,messageType,config.colors.error,false,config.messages.title.error,false,config.messages.wentWrong,false,false,false,false); 
-                return;
-            }else{
-                return;
-            }
-        }
-        var totalUserStaking = getStakeUsers.length;
-        var usersToCreditLog = '';
-        var stakeBalanceByUserID =  [];
-        var totalUserStakeBalance = 0;
-        for (var i = 0 ; i < getStakeUsers.length ; ++i){
-            var userID = getStakeUsers[i].discord_id;
-            var userStakeBalance = getStakeUsers[i].stake_balance;
-            stakeBalanceByUserID[userID] = userStakeBalance;
-            usersToCreditLog = usersToCreditLog + userID+', ';
-            totalUserStakeBalance = Big(totalUserStakeBalance).plus(userStakeBalance);
-            countCreditedStakes++;
-            //console.log('User: '+userID+' - Stake balance: '+userStakeBalance);
-        }
-        usersToCreditLog = usersToCreditLog.slice(0, -2);
-        // Debug log
-        if(config.staking.debug){
-            log.log_write_console(config.messages.log.stakecredit3+' '+totalUserStaking);
-            log.log_write_console(config.messages.log.stakecredit4+' '+usersToCreditLog);
-        }
-        // Calculate how much of the stake balance belongs to the users stake balance // Rest balance belongs to wallet as its not market as stake from the users
-        var down = 0;
-        var totalStakeForStakers = Big(totalUserStakeBalance).div(walletBalance);
-        totalStakeForStakers = Big(totalStakeForStakers).times(totalStakeSum).round(8, down);
-        // Debug log
-        if(config.staking.debug){
-            log.log_write_console(config.messages.log.stakecredit5+' '+totalUserStakeBalance);
-            log.log_write_console(config.messages.log.stakecredit6+' '+totalStakeForStakers.toFixed(8));
-        } 
-        // Mark transactions as credited on database
-        var markStakesCredited = transaction.transaction_update_stake_transaction_credited(highestTransactionID);
-        if(!markStakesCredited){
-            if(manuallyFired == 1){
-                chat.chat_reply(msg,'embed',userName,messageType,config.colors.error,false,config.messages.title.error,false,config.messages.wentWrong,false,false,false,false); 
-                return;
-            }else{
-                return;
-            }
-        }
-        // Credit the user with the % of the not credited sum of stakes from array and write to payment table log for user
-        var down = 0;
-        for (var key in stakeBalanceByUserID) {
-            // Calc % of current stake cedit for user
-            var stakeCreditValue = Big(stakeBalanceByUserID[key]).div(totalUserStakeBalance);
-            stakeCreditValue = Big(stakeCreditValue).times(totalStakeForStakers).round(8, down);
-            // Debug log
-            if(config.staking.debug)
-                log.log_write_console(config.messages.log.stakecredit8+' '+key +' '+config.messages.log.stakecredit9+' '+stakeBalanceByUserID[key]+' '+config.messages.log.stakecredit10+' '+Big(stakeCreditValue).toFixed(8));
-            // Credit stake amount to user
-            var creditResult = await user.user_add_balance(Big(stakeCreditValue).toFixed(8),key);
-            if(!creditResult){
-                if(manuallyFired == 1){
-                    chat.chat_reply(msg,'embed',userName,messageType,config.colors.error,false,config.messages.title.error,false,config.messages.wentWrong,false,false,false,false); 
-                    return;
-                }else{
-                    return;
-                }
-            }
-            // Write to payment table send and received
-            var saveStakeCredit = await transaction.transaction_save_payment_to_db(Big(stakeCreditValue).toString(),key,key,config.messages.payment.stake.received);
-            if(!saveStakeCredit){
-                if(manuallyFired == 1){
-                    chat.chat_reply(msg,'embed',userName,messageType,config.colors.error,false,config.messages.title.error,false,config.messages.wentWrong,false,false,false,false); 
-                    return;
-                }else{
-                    return;
-                }
-            }
-        }
-        // Write to log on database the ids of the stake transactions and users
-        log.log_write_database(0,config.messages.log.stakecredit+' '+Big(walletBalance).toFixed()+config.messages.log.stakecredit1+' '+Big(totalStakeSum).toFixed(8)+config.messages.log.stakecredit2+' '+Big(totalStakeSumMinusOwnerPercentage).toFixed()+' '+config.messages.log.stakecredit3+' '+totalUserStaking+config.messages.log.stakecredit4+' '+usersToCreditLog+config.messages.log.stakecredit5+' '+totalUserStakeBalance+config.messages.log.stakecredit6+' '+totalStakeForStakers,Big(totalStakeForStakers).toFixed(8));
-        // Send message to chat about credited transaction count, users, value 
-        //msg,replyType,replyUsername,senderMessageType,replyEmbedColor,replyAuthor,replyTitle,replyFields,replyDescription,replyFooter,replyThumbnail,replyImage,replyTimestamp
+    command_credit_stakes: async function(manuallyFired, userName, messageType, userRole, msg){
+    // Check if user is admin
+    if(userRole < 3){
+        chat.chat_reply(msg, 'embed', userName, messageType, config.colors.error, false, config.messages.title.error, false, config.messages.notAllowedCommand, false, false, false, false);
+        return;
+    }
+
+    // Get total wallet balance
+    var walletBalance = await wallet.wallet_get_balance();
+    if(!walletBalance){
         if(manuallyFired == 1){
-            chat.chat_reply(msg,'embed',false,messageType,config.colors.special,false,config.messages.creditstakes.title,[[config.messages.creditstakes.stakes,totalStakes,true],[config.messages.creditstakes.amount,Big(totalStakeSum).toFixed(8)+' '+config.wallet.coinSymbolShort,true],[config.messages.creditstakes.users,totalUserStaking,true]],config.messages.creditstakes.description,false,config.wallet.thumbnailIcon,false,false);
-        }else{
-            // Write to log and pool channel
-            log.log_write_console(config.messages.creditstakes.cron+' `'+totalStakes+'` '+config.messages.creditstakes.cron2);
-            chat.chat_reply('pool','pool',false,messageType,config.colors.special,false,config.messages.creditstakes.title,[[config.messages.creditstakes.stakes,totalStakes,true],[config.messages.creditstakes.amount,Big(totalStakeSum).toFixed(8)+' '+config.wallet.coinSymbolShort,true],[config.messages.creditstakes.users,totalUserStaking,true]],config.messages.creditstakes.description,false,config.wallet.thumbnailIcon,false,false);
+            chat.chat_reply(msg, 'embed', userName, messageType, config.colors.error, false, config.messages.title.error, false, config.messages.walletOffline, false, false, false, false);
+            return;
+        } else {
+            log.log_write_console(config.messages.walletOffline);
+            return;
         }
-    },
+    }
+
+    // Debug log for wallet balance
+    if(config.staking.debug)
+        log.log_write_console(config.messages.log.stakecredit + ' Wallet Balance: ' + Big(walletBalance).toFixed());
+
+    // Get not credited stake transactions and sum amount
+    var transactionsToCredit = await transaction.transaction_get_stake_transactions_to_credit();
+    if(!transactionsToCredit){
+        if(manuallyFired == 1){
+            chat.chat_reply(msg, 'embed', userName, messageType, config.colors.error, false, config.messages.title.error, false, config.messages.wentWrong, false, false, false, false); 
+            return;
+        } else {
+            return;
+        }
+    }
+       // Check if no transaction to handle
+    var countCreditedStakes = 0;
+    if(!transactionsToCredit.length){
+        if(manuallyFired == 1){
+            chat.chat_reply(msg, 'embed', userName, messageType, config.colors.special, false, config.messages.creditstakes.manually, [[config.messages.creditstakes.transactions, countCreditedStakes, false]], false, false, false, false, false);
+            return;
+        } else {
+            log.log_write_console(config.messages.creditstakes.cron + ' `' + countCreditedStakes + '` ' + config.messages.creditstakes.cron2);
+            return;
+        }
+    }
+
+    var totalStakes = 0;
+    var totalStakeSum = 0;
+    var transactionsToCreditLog = config.messages.log.stakecredit7 + ' ';
+    var highestTransactionID = 0;
+    for(var i = 0; i < transactionsToCredit.length; i++){
+        transactionsToCreditLog += transactionsToCredit[i].id + ', ';
+        highestTransactionID = transactionsToCredit[i].id;
+        totalStakeSum = Big(totalStakeSum).plus(transactionsToCredit[i].amount);
+        totalStakes++;
+    }
+
+    transactionsToCreditLog = transactionsToCreditLog.slice(0, -2);
+
+    // Debug log for total stake sum before owner fee
+    if(config.staking.debug)
+        log.log_write_console(config.messages.log.stakecredit1 + ' Total Stake Sum Before Owner Fee: ' + Big(totalStakeSum).toFixed());
+
+    // Ensure owner's percentage is within expected range
+    if(config.staking.ownerPercentage < 0 || config.staking.ownerPercentage > 100){
+        log.log_write_console('Error: Owner\'s percentage is out of range: ' + config.staking.ownerPercentage);
+        return;
+    }
+
+    // Calculate the owner's fee
+    var ownersFee = Big(totalStakeSum).times(config.staking.ownerPercentage).div(100);
+    log.log_write_console('Owner\'s Fee: ' + ownersFee.toFixed(8));
+
+    // Subtract bot owner percentage from total sum of stakes
+    var totalStakeSumMinusOwnerPercentage = Big(totalStakeSum).minus(ownersFee);
+
+    // Debug log for net reward after owner fee
+    if(config.staking.debug){
+        log.log_write_console(config.messages.log.stakecredit2 + ' Net Reward After Owner Fee: ' + Big(totalStakeSumMinusOwnerPercentage).toFixed());
+    }
+
+    // Retrieve user staking balances
+    var getStakeUsers = await user.user_get_stake_users();
+    if(!getStakeUsers){
+        if(manuallyFired == 1){
+            chat.chat_reply(msg, 'embed', userName, messageType, config.colors.error, false, config.messages.title.error, false, config.messages.wentWrong, false, false, false, false); 
+            return;
+        } else {
+            return;
+        }
+    }
+
+    var usersToCreditLog = '';
+    var stakeBalanceByUserID = {};
+    var totalUserStakeBalance = Big(0);
+    for(var i = 0; i < getStakeUsers.length; i++){
+        var userID = getStakeUsers[i].discord_id;
+        var userStakeBalance = getStakeUsers[i].stake_balance;
+        stakeBalanceByUserID[userID] = userStakeBalance;
+        usersToCreditLog += userID + ', ';
+        totalUserStakeBalance = totalUserStakeBalance.plus(userStakeBalance);
+        countCreditedStakes++;
+    }
+
+    usersToCreditLog = usersToCreditLog.slice(0, -2);
+
+    // Debug log for total user staking and users to credit
+    if(config.staking.debug){
+        log.log_write_console(config.messages.log.stakecredit3 + ' Total User Staking: ' + getStakeUsers.length);
+        log.log_write_console(config.messages.log.stakecredit4 + ' Users to Credit Log: ' + usersToCreditLog);
+        log.log_write_console('Total User Stake Balance: ' + totalUserStakeBalance.toString());
+    }
+       // Mark transactions as credited on database
+       var markStakesCredited = await transaction.transaction_update_stake_transaction_credited(highestTransactionID);
+       if(!markStakesCredited){
+           if(manuallyFired == 1){
+               chat.chat_reply(msg, 'embed', userName, messageType, config.colors.error, false, config.messages.title.error, false, config.messages.wentWrong, false, false, false, false); 
+        return;
+    } else {
+        log.log_write_console('Failed to mark transactions as credited.');
+        return;
+    }
+}   
+    // Credit each user with their share of the rewards
+    for(var key in stakeBalanceByUserID){
+        var userStakePercentage = Big(stakeBalanceByUserID[key]).div(totalUserStakeBalance);
+        var stakeCreditValue = userStakePercentage.times(totalStakeSumMinusOwnerPercentage).round(8, 0);
+
+        
+        // Calculate real percentage value
+        var realPercentageValue = userStakePercentage.times(100).toFixed(6) + '%';
+
+        // Construct the log message
+        var logMessage = [
+            'Discord ID: ' + key,
+            'Staked Balance: ' + stakeBalanceByUserID[key].toString(),
+            'User Stake Percentage: ' + realPercentageValue,
+            'Stake Credit Value: ' + stakeCreditValue.toFixed(8)
+        ].join(', ');
+
+        // Print the log message
+        if(config.staking.debug){
+            log.log_write_console(logMessage);
+        }
+
+
+        // Credit stake amount to user
+        var creditResult = await user.user_add_stake_balance(stakeCreditValue.toFixed(8), key, moment().tz(config.staking.timezone).format('YYYY-MM-DD HH:mm:ss'), manuallyFired);
+        if(!creditResult){
+            if(manuallyFired == 1){
+                chat.chat_reply(msg, 'embed', userName, messageType, config.colors.error, false, config.messages.title.error, false, config.messages.wentWrong, false, false, false, false); 
+                return;
+            } else {
+                return;
+            }
+        }
+
+        // Write to payment table send and received
+        var saveStakeCredit = await transaction.transaction_save_payment_to_db(stakeCreditValue.toString(), key, key, config.messages.payment.stake.received);
+        if(!saveStakeCredit){
+            if(manuallyFired == 1){
+                chat.chat_reply(msg, 'embed', userName, messageType, config.colors.error, false, config.messages.title.error, false, config.messages.wentWrong, false, false, false, false); 
+                return;
+            } else {
+                return;
+            }
+        }
+    }
+
+    // Write to log on database the ids of the stake transactions and users
+    log.log_write_database(0, config.messages.log.stakecredit + ' ' + Big(walletBalance).toFixed() + config.messages.log.stakecredit1 + ' ' + Big(totalStakeSum).toFixed(8) + config.messages.log.stakecredit2 + ' ' + Big(totalStakeSumMinusOwnerPercentage).toFixed() + ' ' + config.messages.log.stakecredit3 + ' ' + getStakeUsers.length + config.messages.log.stakecredit4 + ' ' + usersToCreditLog + config.messages.log.stakecredit5 + ' ' + totalUserStakeBalance + config.messages.log.stakecredit6 + ' ' + totalStakeSum, Big(totalStakeSum).toFixed(8));
+
+    // Send message to chat about credited transaction count, users, value
+    if(manuallyFired == 1){
+        chat.chat_reply(msg, 'embed', false, messageType, config.colors.special, false, config.messages.creditstakes.title, [[config.messages.creditstakes.stakes, totalStakes, true], [config.messages.creditstakes.amount, Big(totalStakeSum).toFixed(8) + ' ' + config.wallet.coinSymbolShort, true], [config.messages.creditstakes.users, getStakeUsers.length, true]], config.messages.creditstakes.description, false, config.wallet.thumbnailIcon, false, false);
+    } else {
+        log.log_write_console(config.messages.creditstakes.cron + ' `' + totalStakes + '` ' + config.messages.creditstakes.cron2);
+        chat.chat_reply('pool', 'pool', false, messageType, config.colors.special, false, config.messages.creditstakes.title, [[config.messages.creditstakes.stakes, totalStakes, true], [config.messages.creditstakes.amount, Big(totalStakeSum).toFixed(8) + ' ' + config.wallet.coinSymbolShort, true], [config.messages.creditstakes.users, getStakeUsers.length, true]], config.messages.creditstakes.description, false, config.wallet.thumbnailIcon, false, false);
+    }
+},
 
     /* ------------------------------------------------------------------------------ */
     // !d / !deposit -> get current deposit address or create new one
